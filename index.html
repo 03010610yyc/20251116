@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>p5.js 基礎概念測驗 (特效滿載)</title>
+    <!-- 載入 p5.js 函式庫 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.1/p5.js"></script>
+    <style>
+        /* 確保畫布填滿整個視窗且沒有滾動條 */
+        body {
+            margin: 0;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background-color: #1e2330;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <script>
+        // --- 題庫資料 (硬編碼) ---
+        const initialPoolData = [
+            {
+                q: "p5.js中,哪個函數在程式開始時只運行一次?",
+                choices: ["setup()", "draw()", "preload()", "mousePressed()"],
+                answer: "A",
+                explain: "setup() 函式只在程式開始時執行一次,用於初始化設定"
+            },
+            {
+                q: "哪個函數會不斷重複執行,用於繪製畫面?",
+                choices: ["setup()", "draw()", "mouseClicked()", "keyTyped()"],
+                answer: "B",
+                explain: "draw() 函式會持續重複執行,用於更新和繪製畫面"
+            },
+            {
+                q: "用於載入外部檔案(如圖片或CSV)的函數是?",
+                choices: ["createCanvas()", "background()", "preload()", "fill()"],
+                answer: "C",
+                explain: "preload() 函式用於預先載入外部資源,確保資源在程式開始前載入完成"
+            },
+            {
+                q: "設定畫布大小的函數是?",
+                choices: ["setSize()", "canvas()", "createCanvas()", "window()"],
+                answer: "C",
+                explain: "createCanvas() 用於創建指定大小的繪圖畫布"
+            },
+            {
+                q: "改變圖形填充顏色的函數是?",
+                choices: ["fill()", "stroke()", "rect()", "color()"],
+                answer: "A",
+                explain: "fill() 函式用於設定後續繪製圖形的填充顏色"
+            },
+            {
+                q: "p5.js的畫布原點(0,0)在哪個位置?",
+                choices: ["左上角", "右下角", "中心", "左下角"],
+                answer: "A",
+                explain: "在p5.js中,座標系統的原點(0,0)位於畫布的左上角"
+            }
+        ];
+
+        // --- 全域變數 ---
+        let pool = []; 
+        let quiz = [];
+        let current = 0;
+        let selected = -1;
+        let score = 0;
+        let finished = false;
+        let showAnswer = false;
+        let confetti = []; // 用於答對爆發和結束時的紙屑
+        let fireworks = []; // 用於高分時的煙火
+        let shakeOffset = 0; // 用於答錯震動效果
+        let textFlashHue = 0; // 用於高分文字顏色變化
+        let flashTimer = 0; // 用於未選擇答案的閃紅提示
+
+
+        function setup() {
+            createCanvas(windowWidth, windowHeight);
+            textFont('Arial');
+            textSize(16);
+            noStroke();
+            pool = initialPoolData.slice();
+            restartQuiz(true);
+        }
+
+        function draw() {
+            background(30, 35, 48);
+            
+            // 啟用震動效果
+            if (shakeOffset > 0) {
+                // 減少震動幅度
+                shakeOffset *= 0.8; 
+                // 奇偶幀切換正負方向，產生震動感
+                let offset = (frameCount % 2 === 0) ? shakeOffset : -shakeOffset;
+                translate(offset, 0);
+            } else {
+                shakeOffset = 0;
+            }
+
+            // 柔和的背景動畫 (Subtle Background Animation)
+            drawBackgroundParticles();
+
+            // 繪製紙屑
+            updateConfetti();
+            for (let c of confetti) {
+                c.show();
+            }
+
+            if (!finished) {
+                // --- 測驗進行中 ---
+                
+                // 繪製即時分數
+                drawScoreDisplay();
+
+                let item = quiz[current];
+                fill(255);
+                
+                // 題號
+                textSize(20);
+                textAlign(CENTER, CENTER);
+                text(`題目 ${current + 1} / ${quiz.length}`, width/2, height * 0.1);
+                
+                // 題目文字
+                textSize(24);
+                textAlign(CENTER, CENTER);
+                textWrap(WORD);
+                rectMode(CENTER);
+                text(item.q, width/2, height * 0.2, width * 0.8, height * 0.15);
+                rectMode(CORNER); 
+
+                // 選項區域
+                drawOptions(item);
+
+                // 提示/說明文字和按鈕
+                textAlign(CENTER, TOP);
+                textSize(16);
+                fill(200);
+                if (showAnswer) {
+                    text(`說明: ${item.explain}`, width/2, height * 0.85, width * 0.8);
+                    drawButton('下一題', width/2 - 50, height * 0.92, 100, 40);
+                } else {
+                    drawButton('提交答案', width/2 - 50, height * 0.92, 100, 40);
+                }
+
+            } else {
+                // --- 結果畫面 ---
+                drawResultsScreen();
+            }
+            
+            // 繪製閃紅效果 (如果點擊提交但未選中選項)
+            updateFlash();
+        }
+        
+        // --- 繪製函式 ---
+        
+        function drawBackgroundParticles() {
+            push();
+            fill(50, 60, 80, 50);
+            noStroke();
+            for (let i = 0; i < 20; i++) {
+                let t = frameCount * 0.005 + i * 10; 
+                let x = map(noise(t), 0, 1, 0, width);
+                let y = map(noise(t + 100), 0, 1, 0, height);
+                let size = map(noise(t + 200), 0, 1, 10, 50);
+                circle(x, y, size * 0.5);
+            }
+            pop();
+        }
+
+        function drawScoreDisplay() {
+            push();
+            textAlign(RIGHT, CENTER);
+            textSize(20);
+            fill(150, 200, 255);
+            text(`得分: ${score}`, width - 40, height * 0.05);
+            pop();
+        }
+
+        function drawOptions(item) {
+            const optX = width * 0.2;
+            const optWidth = width * 0.6;
+            let optY = height * 0.35;
+            let h = 60;
+
+            for (let i = 0; i < item.choices.length; i++) {
+                let isHover = mouseX > optX && mouseX < optX + optWidth && 
+                              mouseY > optY && mouseY < optY + h;
+                
+                let boxColor = color(50, 60, 80);
+                
+                if (showAnswer) {
+                    const letter = String.fromCharCode(65 + i);
+                    if (letter === item.answer) boxColor = color(60, 180, 60); // 正確
+                    else if (i === selected && letter !== item.answer) boxColor = color(200, 60, 60); // 錯誤選中
+                } else if (i === selected) {
+                    boxColor = color(80, 110, 160); // 選中但未提交
+                } else if (isHover) {
+                    boxColor = color(70, 80, 100); // 懸停
+                }
+                
+                fill(boxColor);
+                rect(optX, optY, optWidth, h, 12); // 圓角矩形
+
+                fill(255);
+                textSize(18);
+                textAlign(LEFT, CENTER);
+                text(`${String.fromCharCode(65 + i)}. ${item.choices[i]}`, 
+                     optX + 20, optY + h/2);
+                
+                optY += h + 15;
+            }
+        }
+
+        function drawResultsScreen() {
+            textAlign(CENTER, CENTER);
+                
+            // 高分（4題以上）時的煙火特效
+            if (score >= 4) {
+                colorMode(HSB);
+                textFlashHue = (textFlashHue + 2) % 360; 
+                fill(textFlashHue, 80, 100);
+                
+                updateFireworks();
+                drawFireworks();
+            } else {
+                colorMode(RGB);
+                fill(255);
+            }
+
+            // 標題與分數
+            textSize(28);
+            text(`測驗完成！`, width/2, height * 0.3);
+            
+            textSize(24);
+            text(`最終分數：${score} / ${quiz.length}`, width/2, height * 0.4);
+            
+            // 回饋文字
+            const pct = score / quiz.length;
+            let feedback = '';
+            if (pct === 1) feedback = '完美！你完全掌握了 p5.js！';
+            else if (pct >= 0.8) feedback = '表現優異！只差一點點！';
+            else if (pct >= 0.6) feedback = '不錯的表現！';
+            else feedback = '繼續加油！多練習 p5.js 基礎觀念！';
+            
+            textSize(20);
+            text(feedback, width/2, height * 0.5);
+            
+            // 重試按鈕
+            colorMode(RGB); 
+            fill(255);
+            drawButton('重試', width/2 - 50, height * 0.8, 100, 40);
+        }
+
+        // --- 互動與控制函式 ---
+
+        function mousePressed() {
+            if (quiz.length === 0) return;
+            
+            if (!finished) {
+                const optX = width * 0.2;
+                const optWidth = width * 0.6;
+                let optY = height * 0.35;
+                let h = 60;
+
+                // 檢查是否點擊選項
+                for (let i = 0; i < 4; i++) {
+                    if (mouseX > optX && mouseX < optX + optWidth && 
+                        mouseY > optY && mouseY < optY + h) {
+                        if (!showAnswer) {
+                            selected = i;
+                        }
+                        return;
+                    }
+                    optY += h + 15;
+                }
+
+                // 檢查是否點擊提交/下一題按鈕
+                const bx = width/2 - 50;
+                const by = height * 0.92;
+                const bw = 100;
+                const bh = 40;
+                
+                if (mouseX > bx && mouseX < bx + bw && 
+                    mouseY > by && mouseY < by + bh) {
+                    if (!showAnswer) {
+                        // 1. 檢查是否選取答案
+                        if (selected === -1) {
+                            flashRed(); // 未選擇，閃紅提示
+                            return;
+                        }
+                        
+                        // 2. 進行評分與特效
+                        const chosenLetter = String.fromCharCode(65 + selected);
+                        const isCorrect = (chosenLetter === quiz[current].answer);
+
+                        if (isCorrect) {
+                            score++;
+                            triggerLocalBurst(selected); // 答對：選項粒子爆發
+                        } else {
+                            shakeOffset = 15; // 答錯：啟動畫面震動
+                        }
+                        
+                        showAnswer = true;
+                    } else {
+                        // 下一題或結束
+                        current++;
+                        selected = -1;
+                        showAnswer = false;
+                        if (current >= quiz.length) {
+                            finished = true;
+                            spawnConfetti(score); // 結束：紙屑雨
+                        }
+                    }
+                }
+            } else {
+                // --- 結果畫面：重試按鈕 ---
+                const bx = width/2 - 50;
+                const by = height * 0.8;
+                const bw = 100;
+                const bh = 40;
+                if (mouseX > bx && mouseX < bx + bw && 
+                    mouseY > by && mouseY < by + bh) {
+                    restartQuiz();
+                }
+            }
+        }
+
+        // --- 特效函式 ---
+        
+        // 按鈕繪製
+        function drawButton(label, x, y, w, h) {
+            let buttonColor = color(80, 130, 200);
+            if (mouseX > x && mouseX < x + w && mouseY > y && mouseY < y + h) {
+                buttonColor = color(100, 150, 220);
+            }
+
+            fill(buttonColor);
+            rect(x, y, w, h, 8);
+            fill(255);
+            textSize(16);
+            textAlign(CENTER, CENTER);
+            text(label, x + w / 2, y + h / 2);
+        }
+
+        /** 答對時，在正確選項周圍產生粒子爆發 */
+        function triggerLocalBurst(optionIndex) {
+            const optX = width * 0.2;
+            const optWidth = width * 0.6;
+            let optY = height * 0.35 + optionIndex * (60 + 15);
+            let h = 60;
+            
+            const centerX = optX + optWidth / 2;
+            const centerY = optY + h / 2;
+            
+            for (let i = 0; i < 45; i++) { // 增加粒子數量
+                const col = color(random(50, 150), random(200, 255), random(50, 150));
+                const p = new Confetti(centerX, centerY, col);
+                // 讓粒子更快的向外噴射
+                p.vel = p5.Vector.random2D().mult(random(5, 12)); 
+                p.life = 75; 
+                confetti.push(p);
+            }
+        }
+
+        // 閃紅提示 (用於未選答案時)
+        function flashRed() {
+            flashTimer = 20;
+            if (flashInterval) clearInterval(flashInterval);
+            flashInterval = setInterval(() => {
+                flashTimer--;
+                if (flashTimer <= 0) clearInterval(flashInterval);
+            }, 30);
+        }
+        
+        function updateFlash() {
+            if (flashTimer > 0) {
+                push();
+                colorMode(RGB);
+                // 讓紅色透明度隨著時間減少
+                fill(255, 0, 0, map(flashTimer, 20, 0, 100, 0)); 
+                rect(0, 0, width, height);
+                pop();
+            }
+        }
+
+        // Confetti 類別
+        class Confetti {
+            constructor(x, y, col) {
+                this.pos = createVector(x, y);
+                this.vel = createVector(random(-3, 3), random(-8, -3)); 
+                this.size = random(6, 12);
+                this.col = col;
+                this.life = 180;
+                this.rot = random(TWO_PI);
+                this.avel = random(-0.1, 0.1);
+            }
+            update() {
+                this.vel.y += 0.08;
+                this.pos.add(this.vel);
+                this.rot += this.avel;
+                this.life--;
+            }
+            show() {
+                push();
+                translate(this.pos.x, this.pos.y);
+                rotate(this.rot);
+                noStroke();
+                // 讓粒子顏色隨著生命週期淡出
+                fill(red(this.col), green(this.col), blue(this.col), map(this.life, 0, 180, 0, 255));
+                rect(0, 0, this.size, this.size * 0.6);
+                pop();
+            }
+            isDead() {
+                return this.life <= 0 || this.pos.y > height + 20;
+            }
+        }
+
+        // 產生結束時的紙屑雨
+        function spawnConfetti(score) {
+            const count = map(score, 0, quiz.length, 30, 250); // 更多紙屑
+            for (let i = 0; i < count; i++) {
+                const x = random(width * 0.2, width * 0.8);
+                const y = random(-100, -20);
+                const c = color(random(150, 255), random(150, 255), random(150, 255));
+                confetti.push(new Confetti(x, y, c));
+            }
+        }
+
+        function updateConfetti() {
+            for (let i = confetti.length - 1; i >= 0; i--) {
+                confetti[i].update();
+                if (confetti[i].isDead()) confetti.splice(i, 1);
+            }
+        }
+
+        // --- 煙火類別與邏輯 (高分結束特效) ---
+        class Firework {
+            constructor() {
+                this.x = random(width * 0.2, width * 0.8);
+                this.y = height;
+                this.targetY = random(height * 0.2, height * 0.6);
+                this.speed = random(8, 12);
+                this.particles = [];
+                this.exploded = false;
+                this.hue = random(360);
+            }
+
+            update() {
+                if (!this.exploded) {
+                    this.y -= this.speed;
+                    if (this.y <= this.targetY) {
+                        this.explode();
+                    }
+                }
+                
+                for (let i = this.particles.length - 1; i >= 0; i--) {
+                    this.particles[i].update();
+                    if (this.particles[i].lifetime <= 0) {
+                        this.particles.splice(i, 1);
+                    }
+                }
+            }
+
+            explode() {
+                this.exploded = true;
+                for (let i = 0; i < 50; i++) {
+                    const angle = random(TWO_PI);
+                    const speed = random(2, 6);
+                    const vx = cos(angle) * speed;
+                    const vy = sin(angle) * speed;
+                    this.particles.push(new Particle(this.x, this.y, vx, vy, this.hue));
+                }
+            }
+
+            draw() {
+                if (!this.exploded) {
+                    stroke(255);
+                    strokeWeight(4);
+                    point(this.x, this.y);
+                }
+                
+                for (let p of this.particles) {
+                    p.draw();
+                }
+            }
+
+            isDead() {
+                return this.exploded && this.particles.length === 0;
+            }
+        }
+        
+        class Particle {
+            constructor(x, y, vx, vy, hue) {
+                this.x = x;
+                this.y = y;
+                this.vx = vx;
+                this.vy = vy;
+                this.lifetime = 100;
+                this.hue = hue;
+            }
+
+            update() {
+                this.x += this.vx;
+                this.y += this.vy;
+                this.vy += 0.1;
+                this.lifetime -= 2;
+            }
+
+            draw() {
+                if (this.lifetime > 0) {
+                    push();
+                    colorMode(HSB, 360, 100, 100, 1); 
+                    stroke(this.hue, 100, 100, map(this.lifetime, 0, 100, 0, 1));
+                    strokeWeight(2);
+                    point(this.x, this.y);
+                    pop();
+                }
+            }
+        }
+
+        function updateFireworks() {
+            // 隨機發射新的煙火
+            if (random(1) < 0.03) { 
+                fireworks.push(new Firework());
+            }
+
+            for (let i = fireworks.length - 1; i >= 0; i--) {
+                fireworks[i].update();
+                if (fireworks[i].isDead()) {
+                    fireworks.splice(i, 1);
+                }
+            }
+        }
+
+        function drawFireworks() {
+            for (let fw of fireworks) {
+                fw.draw();
+            }
+        }
+
+        // --- 輔助函式 ---
+
+        // 工具：亂序
+        function shuffleArray(a) {
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+        }
+
+        // 重設測驗
+        function restartQuiz(isInitial = false) {
+            shuffleArray(pool);
+            // 限制題目數量為 5 題
+            quiz = pool.slice(0, min(5, pool.length)); 
+            
+            current = 0;
+            selected = -1;
+            score = 0;
+            finished = false;
+            showAnswer = false;
+            
+            confetti = [];
+            fireworks = [];
+            shakeOffset = 0;
+            textFlashHue = 0;
+            flashTimer = 0;
+            if (flashInterval) {
+                clearInterval(flashInterval);
+                flashInterval = null;
+            }
+        }
+
+        // 視窗調整響應
+        function windowResized() {
+            resizeCanvas(windowWidth, windowHeight);
+        }
+    </script>
+</body>
+</html>
